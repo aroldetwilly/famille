@@ -1,5 +1,5 @@
 // =====================================================================
-//  APPLICATION FAMILLE — interface
+//  APPLICATION FAMILLE — interface 
 // =====================================================================
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 
