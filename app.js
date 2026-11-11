@@ -331,7 +331,16 @@ function renderLogin() {
     e.preventDefault();
     const btn = e.target.querySelector('button'); btn.disabled = true;
     const { error } = await sb.auth.signInWithPassword({ email: C.FAMILY_EMAIL, password: e.target.pw.value });
-    if (error) { alert('Mot de passe incorrect.'); btn.disabled = false; }
+    if (error) {
+      const m = error.message || String(error);
+      const why = /invalid login/i.test(m) ? `Mot de passe incorrect, ou e-mail du config.js (${C.FAMILY_EMAIL}) différent du compte Supabase.`
+        : /not confirmed/i.test(m) ? 'Compte non confirmé : dans Supabase > Authentication > Users, confirme l\'utilisateur.'
+        : /api key|apikey|jwt/i.test(m) ? 'Clé SUPABASE_KEY incorrecte dans config.js.'
+        : /fetch|network|load failed/i.test(m) ? 'Impossible de joindre Supabase : vérifie SUPABASE_URL dans config.js.'
+        : '';
+      alert(`Connexion impossible.\n${why}\n\nDétail : ${m}`);
+      btn.disabled = false;
+    }
   });
 }
 
