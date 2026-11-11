@@ -1,5 +1,5 @@
 // Service worker : notifications + fonctionnement hors-ligne de base
-const CACHE = 'famille-v1';
+const CACHE = 'famille-v3';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'config.js', 'manifest.webmanifest', 'icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
@@ -20,7 +20,7 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
   e.respondWith((async () => {
     try {
-      const res = await fetch(e.request);
+      const res = await fetch(e.request, { cache: 'no-cache' }); // toujours vérifier s'il y a une nouvelle version
       if (res.ok) caches.open(CACHE).then((c) => c.put(e.request, res.clone())).catch(() => {});
       return res;
     } catch {
