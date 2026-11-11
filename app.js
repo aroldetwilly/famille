@@ -52,10 +52,11 @@ const S = {
   session: null,
   me: store.get('me'),
   tab: 'accueil',
-  D: { members: [], appointments: [], bills: [], vehicles: [], maintenance: [], documents: [], shopping: [], chores: [], chore_log: [], locations: [], settings: [] },
+  D: { members: [], appointments: [], bills: [], vehicles: [], maintenance: [], documents: [], shopping: [], chores: [], chore_log: [], chore_plan: [], locations: [], settings: [] },
   urls: {},          // liens signés des fichiers
   showPast: false,
   shopCat: store.get('shopCat') || 'Épicerie',
+  week: null,        // lundi de la semaine affichée (AAAA-MM-JJ)
 };
 const member = (id) => S.D.members.find((m) => m.id === id);
 const nameOf = (id) => member(id)?.name || id || '?';
@@ -169,7 +170,8 @@ function ask(title, choices) {          // petite feuille de choix -> Promise
 const ORDER = { members: 'sort', appointments: 'starts_at', bills: 'due_date', vehicles: 'sort', maintenance: 'due_date', documents: 'created_at', shopping: 'created_at', chores: 'sort' };
 async function load(t) {
   let q = sb.from(t).select('*');
-  if (t === 'chore_log') q = q.order('done_at', { ascending: false }).limit(30);
+  if (t === 'chore_log') q = q.gte('day', planRange()[0]).lte('day', planRange()[1]).limit(1000);
+  else if (t === 'chore_plan') q = q.gte('day', planRange()[0]).lte('day', planRange()[1]).limit(2000);
   else if (ORDER[t]) q = q.order(ORDER[t], { ascending: true, nullsFirst: false });
   const { data, error } = await q;
   if (error) { console.warn(t, error.message); return; }
@@ -355,7 +357,6 @@ function renderWho() {
 }
 
 // ---------- Vues ----------
-const currentTurn = (c) => c.assignees?.length ? c.assignees[(c.turn || 0) % c.assignees.length] : null;
 
 function apptItem(a) {
   const d = new Date(a.starts_at);
@@ -372,13 +373,59 @@ function billItem(b) {
     ${b.comment ? `<div class="s">${esc(b.comment)}</div>` : ''}</div>
     ${b.paid ? '' : `<button class="btn sm" data-act="payBill" data-id="${b.id}">Payée</button>`}</div>`;
 }
-function choreItem(c) {
-  const who = currentTurn(c);
-  return `<div class="item"><div class="avatar">${esc(initial(who))}</div>
-    <div class="grow tap" data-act="editChore" data-id="${c.id}"><div class="t">${esc(c.name)}</div>
-    <div class="s">Au tour de <b>${esc(nameOf(who))}</b>${c.allow_duo ? ' · peut se faire à deux' : ''}</div></div>
-    <button class="btn sm primary" data-act="choreDone" data-id="${c.id}">C'est fait</button></div>`;
+// ---------- Planning des tâches ----------
+const DAY_LETTERS = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+const DAY_NAMES = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+const isParent = () => member(S.me)?.parent ?? ['ronald', 'laet'].includes(S.me);
+const mondayOf = (s) => addDays(s, -((new Date(s + 'T12:00:00').getDay() + 6) % 7));
+const curMonday = () => mondayOf(todayStr());
+const weekDays = (mon) => [0, 1, 2, 3, 4, 5, 6].map((i) => addDays(mon, i));
+const weekIndex = (mon) => Math.round((Date.parse(mon + 'T12:00:00Z') - Date.parse('2024-01-01T12:00:00Z')) / (7 * 86400000));
+function planRange() {
+  const a = curMonday(), b = S.week || a;
+  return [a < b ? a : b, addDays(a > b ? a : b, 6)];
 }
+const planCell = (choreId, day) => S.D.chore_plan.find((p) => p.chore_id === choreId && p.day === day);
+const planDone = (choreId, day) => S.D.chore_log.find((l) => l.chore_id === choreId && l.day === day);
+const choreDays = (c) => (c.days?.length ? c.days : [1, 2, 3, 4, 5, 6, 7]).map(Number).sort();
+
+// Qui fait la tâche c tel jour selon la rotation (déterministe : pas besoin de mémoriser un « tour »)
+function rotationFor(c, day) {
+  const people = S.D.members.map((m) => m.id).filter((id) => (c.assignees || []).includes(id));
+  if (!people.length) return [];
+  if (c.allow_duo && people.length > 1) return people;
+  const days = choreDays(c);
+  const wd = (new Date(day + 'T12:00:00').getDay() + 6) % 7 + 1;
+  const k = days.indexOf(wd);
+  const ci = Math.max(0, S.D.chores.findIndex((x) => x.id === c.id));
+  return [people[(weekIndex(mondayOf(day)) * days.length + k + ci) % people.length]];
+}
+function generatedRows(c, mon, fromDay) {
+  return weekDays(mon).filter((d, i) => d >= fromDay && choreDays(c).includes(i + 1))
+    .map((day) => ({ chore_id: c.id, day, assignees: rotationFor(c, day) })).filter((r) => r.assignees.length);
+}
+// Remplit automatiquement une semaine (actuelle ou future) pour les tâches qui n'ont encore rien
+async function ensureWeek(mon) {
+  if (mon < curMonday()) return false;
+  const days = weekDays(mon), from = mon === curMonday() ? todayStr() : mon;
+  const rows = S.D.chores.filter((c) => !S.D.chore_plan.some((p) => p.chore_id === c.id && days.includes(p.day)))
+    .flatMap((c) => generatedRows(c, mon, from));
+  if (!rows.length) return false;
+  await sb.from('chore_plan').upsert(rows, { onConflict: 'chore_id,day', ignoreDuplicates: true });
+  await load('chore_plan');
+  return true;
+}
+const initials = (ids) => ids.map(initial).join('+');
+function todayItem(c, p) {
+  const done = planDone(c.id, p.day);
+  return `<div class="item"><div class="avatar">${esc(initial(p.assignees[0]))}</div>
+    <div class="grow"><div class="t">${esc(c.name)}</div>
+    <div class="s">${done ? `Fait par <b>${esc(names(done.done_by))}</b> à ${esc(fmtTime(done.done_at))}` : esc(names(p.assignees))}</div></div>
+    ${done ? `<button class="check-done" data-act="planUndo" data-chore="${c.id}" data-day="${p.day}" aria-label="Fait (toucher pour annuler)">✓</button>`
+      : `<button class="btn sm primary" data-act="planDo" data-chore="${c.id}" data-day="${p.day}">À faire</button>`}</div>`;
+}
+const todayPlan = () => S.D.chores.map((c) => [c, planCell(c.id, todayStr())]).filter(([, p]) => p && p.assignees.length);
+
 function maintItem(m, withVehicle) {
   const v = S.D.vehicles.find((x) => x.id === m.vehicle_id);
   return `<div class="item"><div class="grow tap" data-act="editMaint" data-id="${m.id}">
@@ -396,7 +443,7 @@ const VIEWS = {
     else if (pushSupported && (Notification.permission !== 'granted' || !store.get('pushOk')))
       notices.push(`<div class="notice"><b>🔔 Active les notifications</b>Pour recevoir les rappels, les courses, les tâches faites et les alertes bus.<div class="row gap"><button class="btn primary" data-act="enablePush">Activer</button></div></div>`);
 
-    const mine = S.D.chores.filter((c) => currentTurn(c) === S.me);
+    const mine = todayPlan().filter(([c, p]) => p.assignees.includes(S.me) && !planDone(c.id, p.day));
     const appts = S.D.appointments.filter((a) => Date.parse(a.starts_at) > now - 3600000).slice(0, 4);
     const bills = S.D.bills.filter((b) => !b.paid && daysUntil(b.due_date) <= 30);
     const maint = S.D.maintenance.filter((m) => !m.done && m.due_date && daysUntil(m.due_date) <= 45);
@@ -405,7 +452,7 @@ const VIEWS = {
     return `${notices.join('')}
       <p style="margin:2px 0 4px;font-size:20px;font-weight:600">${hello} ${esc(nameOf(S.me))} 👋</p>
       <p class="muted" style="margin:0 0 6px">${esc(fmtDayLong(new Date().toISOString()))}</p>
-      ${mine.length ? `<h2>À faire pour toi</h2><div class="list">${mine.map(choreItem).join('')}</div>` : ''}
+      ${mine.length ? `<h2>À faire pour toi</h2><div class="list">${mine.map(([c, p]) => todayItem(c, p)).join('')}</div>` : ''}
       <h2>Prochains rendez-vous</h2>${appts.length ? `<div class="list">${appts.map(apptItem).join('')}</div>` : '<p class="empty">Aucun rendez-vous à venir.</p>'}
       ${bills.length ? `<h2>Factures à payer</h2><div class="list">${bills.map(billItem).join('')}</div>` : ''}
       ${maint.length ? `<h2>Entretien véhicules</h2><div class="list">${maint.map((m) => maintItem(m, true)).join('')}</div>` : ''}
@@ -441,12 +488,36 @@ const VIEWS = {
   },
 
   taches() {
-    const log = S.D.chore_log.slice(0, 15);
-    return `<div class="list">${S.D.chores.map(choreItem).join('') || '<p class="empty" style="padding:14px">Aucune tâche.</p>'}</div>
-      <button class="btn block" data-act="newChore">+ Ajouter une tâche</button>
-      <h2>Dernières tâches faites</h2>
-      ${log.length ? `<div class="list">${log.map((l) => `<div class="item"><div class="grow"><div class="t">✅ ${esc(l.chore_name)}</div>
-        <div class="s">${esc(names(l.done_by))} · ${esc(ago(l.done_at))}</div></div></div>`).join('')}</div>` : '<p class="empty">Rien pour l\'instant.</p>'}`;
+    const mon = S.week || curMonday(), days = weekDays(mon), today = todayStr();
+    const label = `Semaine du ${fmt(new Date(days[0] + 'T12:00:00'), { day: 'numeric' })} au ${fmt(new Date(days[6] + 'T12:00:00'), { day: 'numeric', month: 'short' })}`;
+    const cell = (c, day) => {
+      const p = planCell(c.id, day), td = day === today ? ' today' : '';
+      const inner = (() => {
+        if (!p || !p.assignees.length) return '';
+        const done = planDone(c.id, day);
+        const duo = p.assignees.length > 1 ? ' duo' : '';
+        if (done) return `<span class="c ok${duo}">✓</span>`;
+        return `<span class="c${duo}${day < today ? ' miss' : ''}">${esc(initials(p.assignees))}</span>`;
+      })();
+      return `<td class="cell${td}" data-act="cell" data-chore="${c.id}" data-day="${day}">${inner}</td>`;
+    };
+    const tp = mon === curMonday() ? todayPlan() : [];
+    return `<div class="wk"><button data-act="week" data-d="-7" aria-label="Semaine précédente">‹</button>
+        <b data-act="week" data-d="0">${esc(label)}</b><button data-act="week" data-d="7" aria-label="Semaine suivante">›</button></div>
+      ${S.D.chores.length ? `<table class="grid"><thead><tr><th class="task">Tâche</th>${days.map((d, i) =>
+        `<th class="${d === today ? 'today' : ''}">${DAY_LETTERS[i]}<b>${new Date(d + 'T12:00:00').getDate()}</b></th>`).join('')}</tr></thead>
+        <tbody>${S.D.chores.map((c) => `<tr><td class="task" data-act="editChore" data-id="${c.id}">${esc(c.name)}</td>${days.map((d) => cell(c, d)).join('')}</tr>`).join('')}</tbody></table>`
+        : '<p class="empty">Aucune tâche.</p>'}
+      <div class="legend">${S.D.members.map((m) => `<span><span class="c">${esc(m.name[0])}</span>${esc(m.name)}</span>`).join('')}
+        <span><span class="c duo">S+T</span>À deux</span><span><span class="c ok">✓</span>Fait</span><span><span class="c miss">S</span>Oublié</span></div>
+      ${tp.length ? `<h2>Aujourd'hui · ${esc(fmtDayLong(new Date().toISOString()))}</h2><div class="list">${tp.map(([c, p]) => todayItem(c, p)).join('')}</div>`
+        : mon === curMonday() ? '<h2>Aujourd\'hui</h2><p class="empty">Rien de prévu aujourd\'hui 🎉</p>' : ''}
+      ${isParent() ? `<div class="row" style="gap:8px;margin-top:12px">
+          <button class="btn sm" style="flex:1" data-act="weekRotation">↻ Remplir avec la rotation</button>
+          <button class="btn sm" style="flex:1" data-act="weekCopy">⧉ Copier sem. précédente</button></div>
+        <button class="btn block" data-act="newChore" style="margin-top:8px">+ Ajouter une tâche</button>
+        <p class="small muted" style="margin-top:12px">Touche une case pour choisir qui la fait, ou le nom d'une tâche pour la modifier (jours, personnes). Chaque nouvelle semaine se remplit toute seule avec la rotation.</p>`
+        : `<p class="small muted" style="margin-top:12px">Touche « À faire » quand c'est fait. Seuls les parents peuvent modifier le planning.</p>`}`;
   },
 
   plus() {
@@ -649,24 +720,67 @@ const ACT = {
   },
 
   // ----- Tâches -----
-  choreDone: async (d) => {
-    const c = S.D.chores.find((x) => x.id === d.id);
-    const turn = currentTurn(c);
-    const choices = [{ label: `${nameOf(turn)} (son tour)`, value: [turn], primary: true },
-      ...c.assignees.filter((a) => a !== turn).map((a) => ({ label: nameOf(a), value: [a] }))];
-    if (c.allow_duo && c.assignees.length > 1) choices.push({ label: `À deux (${names(c.assignees)})`, value: [...c.assignees] });
-    if (!c.assignees.includes(S.me)) choices.push({ label: `Moi (${nameOf(S.me)})`, value: [S.me] });
-    const who = await ask(`Qui a fait « ${c.name} » ?`, choices);
-    if (!who) return;
-    const n = c.assignees.length;
-    const next = who.length === 1 && c.assignees.includes(who[0]) ? (c.assignees.indexOf(who[0]) + 1) % n : ((c.turn || 0) + 1) % n;
-    await db(sb.from('chore_log').insert({ chore_id: c.id, chore_name: c.name, done_by: who }));
-    await db(sb.from('chores').update({ turn: next }).eq('id', c.id));
-    notify({ exclude: [S.me], title: `✅ ${c.name} : c'est fait !`, body: `Par ${names(who)}. Prochain tour : ${nameOf(c.assignees[next])}.`, url: './?tab=taches' });
-    await Promise.all([load('chores'), load('chore_log')]); rerender(); toast('Bravo ! Tout le monde est prévenu ✅');
+  planDo: async (d) => {
+    const c = S.D.chores.find((x) => x.id === d.chore), p = planCell(d.chore, d.day);
+    if (!c || !p || planDone(c.id, d.day)) return;
+    await db(sb.from('chore_log').insert({ chore_id: c.id, chore_name: c.name, done_by: p.assignees, day: d.day }));
+    notify({ exclude: [S.me], title: `✅ ${c.name} : c'est fait !`, body: `Par ${names(p.assignees)}.`, url: './?tab=taches' });
+    await load('chore_log'); rerender(); toast('Bravo ! Tout le monde est prévenu ✅');
   },
-  newChore: () => choreForm({ assignees: ['so', 'thais'] }),
-  editChore: (d) => choreForm(S.D.chores.find((c) => c.id === d.id)),
+  planUndo: async (d) => {
+    const c = S.D.chores.find((x) => x.id === d.chore), l = planDone(d.chore, d.day);
+    if (!l || !confirm(`Annuler « ${c.name} » ?`)) return;
+    await db(sb.from('chore_log').delete().eq('id', l.id));
+    await load('chore_log'); rerender(); toast('Annulé');
+  },
+  week: async (d) => {
+    const n = Number(d.d);
+    S.week = n ? addDays(S.week || curMonday(), n) : curMonday();
+    await Promise.all([load('chore_plan'), load('chore_log')]);
+    await ensureWeek(S.week);
+    rerender();
+  },
+  cell: async (d) => {
+    const c = S.D.chores.find((x) => x.id === d.chore), p = planCell(d.chore, d.day);
+    const done = planDone(d.chore, d.day), canMark = d.day <= todayStr() && p?.assignees.length;
+    const choices = [];
+    if (canMark) choices.push(done ? { label: '↩︎ Annuler « fait »', value: 'undo' } : { label: '✓ Marquer fait', value: 'do', primary: true });
+    if (isParent() && !done) {
+      for (const m of S.D.members) choices.push({ label: m.name, value: ['set', [m.id]] });
+      const kids = S.D.members.filter((m) => !m.parent && !['ronald', 'laet'].includes(m.id)).map((m) => m.id);
+      if (kids.length > 1) choices.push({ label: `À deux (${names(kids)})`, value: ['set', kids] });
+      if (p?.assignees.length) choices.push({ label: 'Personne', value: ['set', []] });
+    }
+    if (!choices.length) return toast(isParent() ? 'Rien à modifier' : 'Seuls les parents peuvent modifier le planning');
+    const r = await ask(`${c.name} · ${fmtDay(d.day)}`, choices);
+    if (!r) return;
+    if (r === 'do') return ACT.planDo(d);
+    if (r === 'undo') return ACT.planUndo(d);
+    await db(sb.from('chore_plan').upsert({ chore_id: c.id, day: d.day, assignees: r[1] }, { onConflict: 'chore_id,day' }));
+    await load('chore_plan'); rerender();
+  },
+  weekRotation: async () => {
+    const mon = S.week || curMonday();
+    if (mon < curMonday()) return toast('Impossible de modifier une semaine passée');
+    if (!confirm('Refaire le planning de cette semaine avec la rotation ? (les tâches déjà faites sont gardées)')) return;
+    const from = mon === curMonday() ? todayStr() : mon;
+    await replaceWeek(mon, from, S.D.chores.flatMap((c) => generatedRows(c, mon, from)));
+    toast('Planning refait ✅');
+  },
+  weekCopy: async () => {
+    const mon = S.week || curMonday();
+    if (mon < curMonday()) return toast('Impossible de modifier une semaine passée');
+    const prev = addDays(mon, -7);
+    const { data } = await sb.from('chore_plan').select('*').gte('day', prev).lte('day', addDays(prev, 6));
+    if (!data?.length) return toast('La semaine précédente est vide');
+    if (!confirm('Copier le planning de la semaine précédente ? (les tâches déjà faites sont gardées)')) return;
+    const from = mon === curMonday() ? todayStr() : mon;
+    const rows = data.map((p) => ({ chore_id: p.chore_id, day: addDays(p.day, 7), assignees: p.assignees })).filter((r) => r.day >= from);
+    await replaceWeek(mon, from, rows);
+    toast('Semaine copiée ✅');
+  },
+  newChore: () => isParent() ? choreForm({ assignees: ['so', 'thais'], days: [1, 2, 3, 4, 5, 6, 7] }) : null,
+  editChore: (d) => isParent() ? choreForm(S.D.chores.find((c) => c.id === d.id)) : toast('Seuls les parents peuvent modifier les tâches'),
 
   // ----- Véhicules -----
   newVehicle: () => vehicleForm({ kind: 'Voiture' }),
@@ -771,26 +885,43 @@ function billForm(b) {
   });
 }
 
+// Remplace les cases non faites d'une semaine (à partir de « from ») par « rows »
+async function replaceWeek(mon, from, rows) {
+  const end = addDays(mon, 6);
+  const doneKeys = new Set(S.D.chore_log.map((l) => l.chore_id + l.day));
+  const toDelete = S.D.chore_plan.filter((p) => p.day >= from && p.day <= end && !doneKeys.has(p.chore_id + p.day)).map((p) => p.id);
+  if (toDelete.length) await db(sb.from('chore_plan').delete().in('id', toDelete));
+  const keep = rows.filter((r) => !doneKeys.has(r.chore_id + r.day));
+  if (keep.length) await db(sb.from('chore_plan').upsert(keep, { onConflict: 'chore_id,day' }));
+  await load('chore_plan'); rerender();
+}
+
 function choreForm(c) {
   const opts = S.D.members.map((m) => ({ v: m.id, l: m.name }));
   openForm({
-    title: c.id ? 'Tâche' : 'Nouvelle tâche', values: { ...c, current: currentTurn(c) },
+    title: c.id ? 'Tâche' : 'Nouvelle tâche', values: { ...c, days: choreDays(c).map(String) },
     fields: [
       { k: 'name', label: 'Tâche', required: true },
-      { k: 'assignees', type: 'checks', label: 'Qui participe à la rotation ?', options: opts },
-      { k: 'allow_duo', type: 'checkbox', label: 'Peut être faite à deux' },
-      ...(c.id ? [{ k: 'current', type: 'select', label: 'Au tour de', options: opts }] : []),
+      { k: 'days', type: 'checks', label: 'Quels jours ?', options: DAY_NAMES.map((n, i) => ({ v: String(i + 1), l: n.slice(0, 3) + '.' })) },
+      { k: 'assignees', type: 'checks', label: 'Qui ? (plusieurs personnes = chacun son tour)', options: opts },
+      { k: 'allow_duo', type: 'checkbox', label: 'Se fait à deux (toutes les personnes cochées ensemble)' },
     ],
     onSave: async (v) => {
       if (!v.assignees.length) throw new Error('Choisis au moins une personne.');
+      if (!v.days.length) throw new Error('Choisis au moins un jour.');
       const order = S.D.members.map((m) => m.id).filter((id) => v.assignees.includes(id));
-      const idx = Math.max(0, order.indexOf(v.current));
-      const row = { name: v.name, assignees: order, allow_duo: v.allow_duo, turn: idx };
-      if (c.id) await db(sb.from('chores').update(row).eq('id', c.id));
-      else await db(sb.from('chores').insert({ ...row, sort: S.D.chores.length + 1 }));
-      await load('chores'); rerender();
+      const row = { name: v.name, assignees: order, allow_duo: v.allow_duo, days: v.days.map(Number).sort() };
+      let id = c.id;
+      if (id) await db(sb.from('chores').update(row).eq('id', id));
+      else id = (await db(sb.from('chores').insert({ ...row, sort: S.D.chores.length + 1 }).select('id')))[0].id;
+      // Les cases à venir (non faites) de cette tâche sont recalculées
+      await db(sb.from('chore_plan').delete().eq('chore_id', id).gt('day', todayStr()));
+      if (!planDone(id, todayStr())) await db(sb.from('chore_plan').delete().eq('chore_id', id).eq('day', todayStr()));
+      await Promise.all([load('chores'), load('chore_plan')]);
+      await ensureWeek(curMonday()); if (S.week && S.week !== curMonday()) await ensureWeek(S.week);
+      rerender();
     },
-    onDelete: c.id ? async () => { await db(sb.from('chores').delete().eq('id', c.id)); await load('chores'); rerender(); } : null,
+    onDelete: c.id ? async () => { await db(sb.from('chores').delete().eq('id', c.id)); await Promise.all([load('chores'), load('chore_plan')]); rerender(); } : null,
   });
 }
 
@@ -901,6 +1032,7 @@ async function onSession(session) {
   S.session = session;
   if (!session) { render(); return; }
   await loadAll();
+  if (await ensureWeek(curMonday())) await load('chore_plan');
   startRealtime();
   handleUrl(location.href);
   if (S.me && store.get('pushOk') && pushSupported && Notification.permission === 'granted') subscribePush(false).catch(() => {});
@@ -908,7 +1040,7 @@ async function onSession(session) {
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW', e));
 document.addEventListener('visibilitychange', async () => {
-  if (document.visibilityState === 'visible' && S.session) { await loadAll(); if ($('#modal').hidden) rerender(); }
+  if (document.visibilityState === 'visible' && S.session) { await loadAll(); await ensureWeek(curMonday()); if ($('#modal').hidden) rerender(); }
 });
 
 const { data: { session } } = await sb.auth.getSession();
