@@ -17,6 +17,10 @@ if (!C.SUPABASE_URL || C.SUPABASE_URL.includes('XXXX')) {
   throw new Error('config');
 }
 
+// Ne garder que https://xxxx.supabase.co (enlève /rest/v1/, / final, espaces…)
+try { C.SUPABASE_URL = new URL(C.SUPABASE_URL.trim()).origin; } catch {}
+C.SUPABASE_KEY = String(C.SUPABASE_KEY || '').trim();
+C.FAMILY_EMAIL = String(C.FAMILY_EMAIL || '').trim().toLowerCase();
 const sb = createClient(C.SUPABASE_URL, C.SUPABASE_KEY);
 const FN = `${C.SUPABASE_URL}/functions/v1/famille`;
 
