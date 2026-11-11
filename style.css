@@ -1,40 +1,187 @@
--- =====================================================================
---  APPLICATION FAMILLE — Mise à jour : planning des tâches à la semaine
---  À coller tel quel dans Supabase > SQL Editor > + > Run
---  (rien à modifier ; peut être relancé sans risque)
--- =====================================================================
+:root {
+  --bg: #ffffff;
+  --bg2: #f5f5f4;
+  --card: #ffffff;
+  --text: #171717;
+  --muted: #737373;
+  --line: #e7e5e4;
+  --accent: #171717;
+  --accent-text: #ffffff;
+  --ok: #15803d;
+  --warn: #b45309;
+  --danger: #b91c1c;
+  --radius: 14px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111111; --bg2: #1c1c1c; --card: #181818; --text: #f5f5f4; --muted: #a3a3a3;
+    --line: #2a2a2a; --accent: #f5f5f4; --accent-text: #111111;
+    --ok: #4ade80; --warn: #fbbf24; --danger: #f87171;
+  }
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body {
+  font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+a { color: inherit; }
+.loading { text-align: center; color: var(--muted); margin-top: 40vh; }
 
--- Les parents (seuls à pouvoir modifier le planning)
-alter table members add column if not exists parent boolean default false;
-update members set parent = (id in ('ronald', 'laet'));
+/* ---------- Structure ---------- */
+header.top {
+  position: sticky; top: 0; z-index: 5; background: var(--bg);
+  padding: calc(var(--safe-t) + 14px) 16px 10px; display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--line);
+}
+header.top h1 { font-size: 22px; margin: 0; flex: 1; letter-spacing: -0.02em; }
+header.top .back { border: 0; background: none; font-size: 22px; padding: 0 6px 0 0; cursor: pointer; }
+main { padding: 14px 16px calc(var(--safe-b) + 96px); max-width: 640px; margin: 0 auto; }
 
--- Jours où chaque tâche revient : 1 = lundi … 7 = dimanche
-alter table chores add column if not exists days int[] default '{1,2,3,4,5,6,7}';
-update chores set days = '{1,2,3,4,5,6,7}' where days is null;
-update chores set days = '{1,4}' where name = 'Sortir les poubelles';
-update chores set days = '{6}'   where name = 'Nettoyer les poubelles';
-update chores set days = '{3}'   where name = 'Trier le linge';
-update chores set days = '{4}'   where name = 'Ranger le linge';
-update chores set days = '{6}'   where name = 'Nettoyer les toilettes';
-update chores set days = '{7}'   where name = 'Nettoyer les chambres';
+nav.tabs {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
+  display: grid; grid-template-columns: repeat(5, 1fr);
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid var(--line); padding-bottom: var(--safe-b);
+}
+nav.tabs button {
+  border: 0; background: none; padding: 8px 0 7px; display: flex; flex-direction: column; align-items: center;
+  gap: 2px; font-size: 11px; color: var(--muted); cursor: pointer;
+}
+nav.tabs button.on { color: var(--text); font-weight: 600; }
+nav.tabs svg { width: 24px; height: 24px; }
 
--- Les tâches faites sont rattachées à un jour
-alter table chore_log add column if not exists day date;
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 22px 0 8px; font-weight: 600; }
+h2:first-child { margin-top: 4px; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.empty { color: var(--muted); font-size: 14px; padding: 10px 2px; }
 
--- Le planning : qui fait quoi, quel jour
-create table if not exists chore_plan (
-  id        uuid primary key default gen_random_uuid(),
-  chore_id  uuid not null references chores(id) on delete cascade,
-  day       date not null,
-  assignees text[] not null default '{}',
-  unique (chore_id, day)
-);
-alter table chore_plan enable row level security;
-drop policy if exists famille_acces on chore_plan;
-create policy famille_acces on chore_plan for all to authenticated using (is_family()) with check (is_family());
+/* ---------- Cartes & listes ---------- */
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; margin-bottom: 10px; }
+.list { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; margin-bottom: 10px; }
+.item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-top: 1px solid var(--line); min-height: 52px; }
+.item:first-child { border-top: 0; }
+.item .grow { flex: 1; min-width: 0; }
+.item .t { font-weight: 550; overflow-wrap: anywhere; }
+.item .s { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.item.tap { cursor: pointer; }
+.item.done .t { text-decoration: line-through; color: var(--muted); }
+.date-badge { width: 46px; text-align: center; flex: none; border: 1px solid var(--line); border-radius: 10px; padding: 4px 0; line-height: 1.1; }
+.date-badge b { display: block; font-size: 18px; }
+.date-badge span { font-size: 11px; text-transform: uppercase; color: var(--muted); }
 
-do $$ begin
-  alter publication supabase_realtime add table chore_plan;
-exception when others then null; end $$;
+.avatar {
+  width: 34px; height: 34px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  border: 1px solid var(--line); background: var(--bg2); font-weight: 600; font-size: 14px;
+}
+.avatar.lg { width: 56px; height: 56px; font-size: 20px; }
 
-select 'Planning installé ✅' as resultat;
+.tag { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+.tag.warn { color: var(--warn); border-color: currentColor; }
+.tag.danger { color: var(--danger); border-color: currentColor; }
+.tag.ok { color: var(--ok); border-color: currentColor; }
+
+/* ---------- Boutons ---------- */
+.btn {
+  border: 1px solid var(--line); background: var(--card); border-radius: 12px; padding: 10px 14px;
+  font-weight: 550; cursor: pointer; white-space: nowrap;
+}
+.btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.btn.danger { color: var(--danger); }
+.btn.sm { padding: 6px 10px; font-size: 14px; border-radius: 10px; }
+.btn.block { width: 100%; }
+.btn:disabled { opacity: .5; }
+.row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.row.gap { gap: 10px; margin-top: 14px; }
+.check {
+  width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--line); flex: none; display: grid; place-items: center;
+  background: none; cursor: pointer; padding: 0;
+}
+.check.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.check-done {
+  width: 44px; height: 44px; border-radius: 50%; border: 0; flex: none; cursor: pointer;
+  background: var(--ok); color: #fff; font-size: 22px; font-weight: 700; display: grid; place-items: center;
+}
+.fab {
+  position: fixed; right: 18px; bottom: calc(var(--safe-b) + 78px); z-index: 9;
+  width: 56px; height: 56px; border-radius: 50%; border: 0; background: var(--accent); color: var(--accent-text);
+  font-size: 30px; line-height: 1; box-shadow: 0 6px 20px rgba(0,0,0,.18); cursor: pointer;
+}
+
+/* ---------- Formulaires ---------- */
+label.f { display: block; margin-bottom: 12px; }
+label.f > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+input[type=text], input[type=number], input[type=date], input[type=datetime-local], input[type=password], input[type=time], select, textarea {
+  width: 100%; padding: 11px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg2);
+  -webkit-appearance: none; appearance: none; min-height: 46px;
+}
+textarea { min-height: 80px; resize: vertical; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chips label { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); padding: 7px 12px; border-radius: 99px; cursor: pointer; }
+.chips input { accent-color: var(--accent); }
+.addbar { display: flex; gap: 8px; margin-bottom: 8px; }
+.addbar input { flex: 1; }
+.addbar select { width: auto; max-width: 42%; }
+
+/* ---------- Fenêtre modale ---------- */
+#modal { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.35); display: flex; align-items: flex-end; justify-content: center; }
+#modal[hidden] { display: none; }
+.sheet {
+  background: var(--bg); width: 100%; max-width: 640px; max-height: 92vh; overflow-y: auto;
+  border-radius: 20px 20px 0 0; padding: 16px 16px calc(var(--safe-b) + 20px);
+  animation: up .18s ease-out;
+}
+@keyframes up { from { transform: translateY(30px); opacity: .6; } }
+.sheet-h { display: flex; align-items: center; margin-bottom: 14px; }
+.sheet-h b { flex: 1; font-size: 18px; }
+.sheet-h .x { border: 0; background: var(--bg2); width: 32px; height: 32px; border-radius: 50%; cursor: pointer; }
+.choice { display: grid; gap: 8px; }
+
+#toast {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--safe-b) + 84px); z-index: 60;
+  background: var(--accent); color: var(--accent-text); padding: 10px 16px; border-radius: 99px; font-size: 14px;
+  max-width: calc(100% - 32px);
+}
+
+/* ---------- Divers ---------- */
+.login { max-width: 360px; margin: 18vh auto 0; padding: 0 16px; text-align: center; }
+.login h1 { font-size: 30px; margin: 0 0 6px; letter-spacing: -0.03em; }
+.who { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 24px; }
+.who button { border: 1px solid var(--line); background: var(--card); border-radius: var(--radius); padding: 18px 8px; display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; }
+.notice { border: 1px dashed var(--line); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 12px; font-size: 14px; }
+.notice b { display: block; margin-bottom: 4px; }
+#map { height: 300px; border-radius: var(--radius); border: 1px solid var(--line); margin-bottom: 12px; z-index: 0; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
+pre.mono { white-space: pre-wrap; background: var(--bg2); padding: 10px; border-radius: 10px; max-height: 320px; overflow: auto; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.menu-tile { border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; background: var(--card); cursor: pointer; text-align: left; }
+.menu-tile .i { font-size: 24px; display: block; margin-bottom: 6px; }
+.menu-tile b { display: block; }
+.menu-tile span { font-size: 13px; color: var(--muted); }
+
+/* ---------- Planning des tâches ---------- */
+.wk { display: flex; align-items: center; justify-content: space-between; margin: 0 0 10px; gap: 8px; }
+.wk button { border: 1px solid var(--line); background: var(--card); border-radius: 10px; width: 36px; height: 36px; font-size: 18px; cursor: pointer; }
+.wk b { font-size: 16px; cursor: pointer; text-align: center; }
+table.grid { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; table-layout: fixed; }
+.grid th, .grid td { border-top: 1px solid var(--line); text-align: center; padding: 6px 0; font-size: 12px; }
+.grid thead th { border-top: 0; color: var(--muted); font-weight: 600; line-height: 1.15; padding: 8px 0; }
+.grid thead th b { display: block; color: var(--text); font-size: 14px; }
+.grid th.task, .grid td.task { text-align: left; padding: 6px 4px 6px 10px; width: 112px; font-size: 13px; font-weight: 550; line-height: 1.2; overflow-wrap: anywhere; }
+.grid td.task, .grid td.cell { cursor: pointer; }
+.grid .today { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.c { width: 28px; height: 28px; border-radius: 50%; display: inline-grid; place-items: center; font-weight: 700; font-size: 12px; border: 1.5px solid var(--line); }
+.c.duo { width: 30px; border-radius: 9px; font-size: 10px; }
+.c.ok { background: var(--ok); border-color: var(--ok); color: #fff; }
+.c.miss { border-color: var(--danger); color: var(--danger); }
+.legend { display: flex; flex-wrap: wrap; gap: 10px 14px; font-size: 12px; color: var(--muted); margin: 10px 2px 4px; }
+.legend > span { display: inline-flex; align-items: center; gap: 5px; }
+.legend .c { width: 20px; height: 20px; font-size: 10px; }
+.legend .c.duo { width: 26px; font-size: 9px; }
+@media (max-width: 360px) { .grid th.task, .grid td.task { width: 92px; font-size: 12px; } .c { width: 24px; height: 24px; font-size: 11px; } .c.duo { width: 26px; } }
