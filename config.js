@@ -3,7 +3,7 @@
 // =====================================================================
 window.FAMILLE_CONFIG = {
   // Supabase > Project Settings > API > Project URL
-  SUPABASE_URL: 'https://fxhcghwjnbugjhweyowj.supabase.co/rest/v1/',
+  SUPABASE_URL: 'https://fxhcghwjnbugjhweyowj.supabase.co',
 
   // Supabase > Project Settings > API Keys > clé "publishable" (ou "anon public")
   SUPABASE_KEY: 'sb_publishable_HC9YmOZwCwC4O4psTUF0Yw_H1rJfYtw',
