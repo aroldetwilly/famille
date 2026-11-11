@@ -1,9 +1,9 @@
 // =====================================================================
-//  APPLICATION FAMILLE — interface  
+//  APPLICATION FAMILLE — interface
 // =====================================================================
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 
-const APP_VERSION = 'v3 · planning semaine';
+const APP_VERSION = 'v4 · accueil tâches';
 const C = window.FAMILLE_CONFIG || {};
 const $ = (s) => document.querySelector(s);
 const app = $('#app');
@@ -417,13 +417,42 @@ async function ensureWeek(mon) {
   return true;
 }
 const initials = (ids) => ids.map(initial).join('+');
+const isParentId = (id) => member(id)?.parent ?? ['ronald', 'laet'].includes(id);
 function todayItem(c, p) {
   const done = planDone(c.id, p.day);
-  return `<div class="item"><div class="avatar">${esc(initial(p.assignees[0]))}</div>
-    <div class="grow"><div class="t">${esc(c.name)}</div>
-    <div class="s">${done ? `Fait par <b>${esc(names(done.done_by))}</b> à ${esc(fmtTime(done.done_at))}` : esc(names(p.assignees))}</div></div>
+  const others = p.assignees.filter((a) => a !== S.me);
+  const sub = done
+    ? `Fait${done.done_by.length === 1 && done.done_by[0] !== S.me ? ' par ' + esc(nameOf(done.done_by[0])) : ''} à ${esc(fmtTime(done.done_at))}`
+    : others.length ? `Avec ${esc(names(others))}` : 'Seul(e)';
+  return `<div class="item ${done ? 'done' : ''}"><div class="grow"><div class="t">${esc(c.name)}</div><div class="s">${sub}</div></div>
     ${done ? `<button class="check-done" data-act="planUndo" data-chore="${c.id}" data-day="${p.day}" aria-label="Fait (toucher pour annuler)">✓</button>`
       : `<button class="btn sm primary" data-act="planDo" data-chore="${c.id}" data-day="${p.day}">À faire</button>`}</div>`;
+}
+const bar = (n, total, cls = '') => `<div class="bar ${cls}"><i style="width:${total ? Math.round((100 * n) / total) : 0}%"></i></div>`;
+function myTasksCard() {
+  const mine = todayPlan().filter(([, p]) => p.assignees.includes(S.me));
+  if (!mine.length) return isParentId(S.me) ? '' : `<div class="mytasks"><div class="head"><b>Mes tâches du jour</b></div><p class="empty" style="padding:4px 14px 14px">Rien à faire aujourd'hui 🎉</p></div>`;
+  const done = mine.filter(([c, p]) => planDone(c.id, p.day)).length;
+  const all = done === mine.length;
+  return `<div class="mytasks"><div class="head"><b>Mes tâches du jour</b><span>${done} sur ${mine.length}${mine.length > 1 ? '' : ''}</span></div>
+    ${bar(done, mine.length)}${mine.map(([c, p]) => todayItem(c, p)).join('')}
+    ${all ? '<div class="item"><div class="grow t" style="text-align:center">🎉 Tout est fait, bravo !</div></div>' : ''}</div>`;
+}
+function kidsCard() {
+  if (!isParentId(S.me)) return '';
+  const tp = todayPlan();
+  const rows = S.D.members.filter((m) => !isParentId(m.id)).map((m) => {
+    const t = tp.filter(([, p]) => p.assignees.includes(m.id));
+    const left = t.filter(([c, p]) => !planDone(c.id, p.day));
+    return { m, total: t.length, done: t.length - left.length, left };
+  });
+  const total = rows.reduce((a, r) => a + r.total, 0), done = rows.reduce((a, r) => a + r.done, 0);
+  return `<div class="mytasks"><div class="head"><b>Les enfants aujourd'hui</b><span>${done} sur ${total}</span></div>
+    ${rows.map((r) => `<div class="item kid"><div class="avatar">${esc(r.m.name[0])}</div><div class="grow">
+      <div class="row" style="justify-content:space-between"><span class="t">${esc(r.m.name)}</span><span class="s">${r.done} / ${r.total}</span></div>
+      ${bar(r.done, r.total, 'sm')}
+      <div class="s">${!r.total ? 'Rien de prévu aujourd\'hui' : r.left.length ? 'Reste : ' + esc(r.left.map(([c]) => c.name).join(', ')) : 'Tout est fait ✅'}</div></div></div>`).join('')}
+    <div class="item tap" data-act="go" data-tab="taches"><div class="grow"><div class="s">Voir le planning de la semaine</div></div>›</div></div>`;
 }
 const todayPlan = () => S.D.chores.map((c) => [c, planCell(c.id, todayStr())]).filter(([, p]) => p && p.assignees.length);
 
@@ -444,7 +473,6 @@ const VIEWS = {
     else if (pushSupported && (Notification.permission !== 'granted' || !store.get('pushOk')))
       notices.push(`<div class="notice"><b>🔔 Active les notifications</b>Pour recevoir les rappels, les courses, les tâches faites et les alertes bus.<div class="row gap"><button class="btn primary" data-act="enablePush">Activer</button></div></div>`);
 
-    const mine = todayPlan().filter(([c, p]) => p.assignees.includes(S.me) && !planDone(c.id, p.day));
     const appts = S.D.appointments.filter((a) => Date.parse(a.starts_at) > now - 3600000).slice(0, 4);
     const bills = S.D.bills.filter((b) => !b.paid && daysUntil(b.due_date) <= 30);
     const maint = S.D.maintenance.filter((m) => !m.done && m.due_date && daysUntil(m.due_date) <= 45);
@@ -453,7 +481,7 @@ const VIEWS = {
     return `${notices.join('')}
       <p style="margin:2px 0 4px;font-size:20px;font-weight:600">${hello} ${esc(nameOf(S.me))} 👋</p>
       <p class="muted" style="margin:0 0 6px">${esc(fmtDayLong(new Date().toISOString()))}</p>
-      ${mine.length ? `<h2>À faire pour toi</h2><div class="list">${mine.map(([c, p]) => todayItem(c, p)).join('')}</div>` : ''}
+      ${myTasksCard()}${kidsCard()}
       <h2>Prochains rendez-vous</h2>${appts.length ? `<div class="list">${appts.map(apptItem).join('')}</div>` : '<p class="empty">Aucun rendez-vous à venir.</p>'}
       ${bills.length ? `<h2>Factures à payer</h2><div class="list">${bills.map(billItem).join('')}</div>` : ''}
       ${maint.length ? `<h2>Entretien véhicules</h2><div class="list">${maint.map((m) => maintItem(m, true)).join('')}</div>` : ''}
@@ -502,7 +530,6 @@ const VIEWS = {
       })();
       return `<td class="cell${td}" data-act="cell" data-chore="${c.id}" data-day="${day}">${inner}</td>`;
     };
-    const tp = mon === curMonday() ? todayPlan() : [];
     return `<div class="wk"><button data-act="week" data-d="-7" aria-label="Semaine précédente">‹</button>
         <b data-act="week" data-d="0">${esc(label)}</b><button data-act="week" data-d="7" aria-label="Semaine suivante">›</button></div>
       ${S.D.chores.length ? `<table class="grid"><thead><tr><th class="task">Tâche</th>${days.map((d, i) =>
@@ -511,14 +538,12 @@ const VIEWS = {
         : '<p class="empty">Aucune tâche.</p>'}
       <div class="legend">${S.D.members.map((m) => `<span><span class="c">${esc(m.name[0])}</span>${esc(m.name)}</span>`).join('')}
         <span><span class="c duo">S+T</span>À deux</span><span><span class="c ok">✓</span>Fait</span><span><span class="c miss">S</span>Oublié</span></div>
-      ${tp.length ? `<h2>Aujourd'hui · ${esc(fmtDayLong(new Date().toISOString()))}</h2><div class="list">${tp.map(([c, p]) => todayItem(c, p)).join('')}</div>`
-        : mon === curMonday() ? '<h2>Aujourd\'hui</h2><p class="empty">Rien de prévu aujourd\'hui 🎉</p>' : ''}
       ${isParent() ? `<div class="row" style="gap:8px;margin-top:12px">
           <button class="btn sm" style="flex:1" data-act="weekRotation">↻ Remplir avec la rotation</button>
           <button class="btn sm" style="flex:1" data-act="weekCopy">⧉ Copier sem. précédente</button></div>
         <button class="btn block" data-act="newChore" style="margin-top:8px">+ Ajouter une tâche</button>
         <p class="small muted" style="margin-top:12px">Touche une case pour choisir qui la fait, ou le nom d'une tâche pour la modifier (jours, personnes). Chaque nouvelle semaine se remplit toute seule avec la rotation.</p>`
-        : `<p class="small muted" style="margin-top:12px">Touche « À faire » quand c'est fait. Seuls les parents peuvent modifier le planning.</p>`}`;
+        : `<p class="small muted" style="margin-top:12px">Tes tâches du jour se cochent depuis l'Accueil. Seuls les parents peuvent modifier le planning.</p>`}`;
   },
 
   plus() {

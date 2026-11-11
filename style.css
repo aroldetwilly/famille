@@ -185,3 +185,14 @@ table.grid { width: 100%; border-collapse: separate; border-spacing: 0; backgrou
 .legend .c { width: 20px; height: 20px; font-size: 10px; }
 .legend .c.duo { width: 26px; font-size: 9px; }
 @media (max-width: 360px) { .grid th.task, .grid td.task { width: 92px; font-size: 12px; } .c { width: 24px; height: 24px; font-size: 11px; } .c.duo { width: 26px; } }
+
+/* ---------- Tâches du jour (accueil) ---------- */
+.mytasks { border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); overflow: hidden; margin: 6px 0 12px; }
+.mytasks .head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 14px 14px 8px; }
+.mytasks .head b { font-size: 17px; }
+.mytasks .head span { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.bar { height: 6px; background: var(--bg2); border-radius: 99px; margin: 0 14px 8px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--ok); border-radius: 99px; transition: width .3s; }
+.bar.sm { margin: 6px 0 4px; height: 5px; }
+.item.kid { align-items: flex-start; }
+.item.kid .avatar { margin-top: 2px; }
