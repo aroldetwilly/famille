@@ -3,6 +3,7 @@
 // =====================================================================
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 
+const APP_VERSION = 'v3 · planning semaine';
 const C = window.FAMILLE_CONFIG || {};
 const $ = (s) => document.querySelector(s);
 const app = $('#app');
@@ -604,7 +605,7 @@ const VIEWS = {
         </form><div id="busOut"></div></div>
 
       <h2>Compte</h2><div class="list"><div class="item tap" data-act="logout"><div class="grow"><div class="t" style="color:var(--danger)">Se déconnecter de ce téléphone</div></div></div></div>
-      <p class="small muted" style="text-align:center;margin-top:24px">Famille · appli privée</p>`;
+      <p class="small muted" style="text-align:center;margin-top:24px">Famille · appli privée · ${APP_VERSION}</p>`;
   },
 };
 
@@ -1038,7 +1039,7 @@ async function onSession(session) {
   if (S.me && store.get('pushOk') && pushSupported && Notification.permission === 'granted') subscribePush(false).catch(() => {});
 }
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW', e));
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((r) => r.update()).catch((e) => console.warn('SW', e));
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'visible' && S.session) { await loadAll(); await ensureWeek(curMonday()); if ($('#modal').hidden) rerender(); }
 });
