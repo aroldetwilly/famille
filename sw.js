@@ -1,4 +1,4 @@
-// Service worker : notifications + fonctionnement hors-ligne de base 
+// Service worker : notifications + fonctionnement hors-ligne de base
 const CACHE = 'famille-v3';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'config.js', 'manifest.webmanifest', 'icons/icon-192.png'];
 
