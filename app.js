@@ -3,7 +3,7 @@
 // =====================================================================
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 
-const APP_VERSION = 'v4 · accueil tâches';
+const APP_VERSION = 'v5 · agenda couleurs';
 const C = window.FAMILLE_CONFIG || {};
 const $ = (s) => document.querySelector(s);
 const app = $('#app');
@@ -58,6 +58,9 @@ const S = {
   showPast: false,
   shopCat: store.get('shopCat') || 'Épicerie',
   week: null,        // lundi de la semaine affichée (AAAA-MM-JJ)
+  calView: store.get('calView') || 'liste',   // préférence de ce téléphone
+  calDate: null,     // jour de référence des vues Jour / Semaine / Mois
+  calSel: null,      // jour sélectionné dans la vue Mois
 };
 const member = (id) => S.D.members.find((m) => m.id === id);
 const nameOf = (id) => member(id)?.name || id || '?';
@@ -359,9 +362,84 @@ function renderWho() {
 
 // ---------- Vues ----------
 
+// ---------- Couleurs & vues de l'agenda ----------
+const PALETTE = ['#3b82f6', '#ec4899', '#8b5cf6', '#f59e0b', '#14b8a6', '#22c55e', '#ef4444'];
+const DEFAULT_COLORS = { ronald: '#3b82f6', laet: '#ec4899', so: '#8b5cf6', thais: '#f59e0b', all: '#14b8a6' };
+const colors = () => ({ ...DEFAULT_COLORS, ...(setting('colors') || {}) });
+const colorOf = (a) => colors()[a.member_id || 'all'] || '#737373';
+const dayOf = (iso) => toLocalInput(iso).slice(0, 10);
+const apptsOn = (day) => S.D.appointments.filter((a) => dayOf(a.starts_at) === day);
+const CAL_VIEWS = [['liste', 'Liste'], ['jour', 'Jour'], ['semaine', 'Semaine'], ['mois', 'Mois']];
+const minutesOf = (iso) => { const d = new Date(iso); return d.getHours() * 60 + d.getMinutes(); };
+
+function calLegend() {
+  const c = colors();
+  return `<div class="legend2">${S.D.members.map((m) => `<span><span class="dot" style="background:${c[m.id] || '#737373'}"></span>${esc(m.name)}</span>`).join('')}
+    <span><span class="dot" style="background:${c.all}"></span>Famille</span></div>`;
+}
+function calNavBar(title) {
+  return `<div class="nav2"><button data-act="calNav" data-d="-1" aria-label="Précédent">‹</button>
+    <b data-act="calNav" data-d="0">${esc(title)}</b><button data-act="calNav" data-d="1" aria-label="Suivant">›</button></div>`;
+}
+function calDayView() {
+  const day = S.calDate || todayStr(), list = apptsOn(day).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+  let h0 = 8, h1 = 20;
+  for (const a of list) { const m = minutesOf(a.starts_at); h0 = Math.min(h0, Math.floor(m / 60)); h1 = Math.max(h1, Math.ceil(m / 60) + 1); }
+  const H = 44, top = (m) => ((m - h0 * 60) / 60) * H + 4;
+  // Rendez-vous qui se chevauchent : côte à côte
+  const lanes = [];
+  const pos = list.map((a) => {
+    const s0 = minutesOf(a.starts_at), e0 = s0 + 60;
+    let lane = lanes.findIndex((end) => end <= s0); if (lane < 0) { lane = lanes.length; lanes.push(0); }
+    lanes[lane] = e0; return { a, s0, lane };
+  });
+  const maxLane = Math.max(1, lanes.length);
+  const title = day === todayStr() ? `Aujourd'hui · ${fmtDay(day)}` : fmt(new Date(day + 'T12:00:00'), { weekday: 'long', day: 'numeric', month: 'short' });
+  const hours = []; for (let h = h0; h < h1; h++) hours.push(`<div class="hr"><i>${h}h</i></div>`);
+  const nowLine = day === todayStr() ? (() => { const m = new Date().getHours() * 60 + new Date().getMinutes(); return m >= h0 * 60 && m <= h1 * 60 ? `<div class="now" style="top:${top(m)}px"></div>` : ''; })() : '';
+  return `${calNavBar(title)}<div class="day">${hours.join('')}
+    ${pos.map(({ a, s0, lane }) => `<div class="ev" data-act="editAppt" data-id="${a.id}" style="top:${top(s0)}px;height:${H - 4}px;background:${colorOf(a)};left:calc(50px + (100% - 60px) * ${lane / maxLane});width:calc((100% - 60px) / ${maxLane} - 4px)">
+      <b>${esc(fmtTime(a.starts_at))} ${esc(a.title)}</b>${esc([a.member_id ? nameOf(a.member_id) : 'Famille', a.location].filter(Boolean).join(' · '))}</div>`).join('')}
+    ${nowLine}</div>${list.length ? '' : '<p class="empty">Aucun rendez-vous ce jour-là.</p>'}${calLegend()}`;
+}
+function calWeekView() {
+  const mon = mondayOf(S.calDate || todayStr()), days = weekDays(mon);
+  const title = `${fmt(new Date(days[0] + 'T12:00:00'), { day: 'numeric', month: 'short' })} – ${fmt(new Date(days[6] + 'T12:00:00'), { day: 'numeric', month: 'short' })}`;
+  return `${calNavBar(title)}<div class="list">${days.map((d) => {
+    const list = apptsOn(d).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+    const dt = new Date(d + 'T12:00:00');
+    return `<div class="wrow ${d === todayStr() ? 'today' : ''}"><div class="d"><small>${esc(fmt(dt, { weekday: 'short' }).replace('.', ''))}</small><b>${dt.getDate()}</b></div>
+      ${list.length ? `<div class="chips2">${list.map((a) => `<div class="pill" data-act="editAppt" data-id="${a.id}" style="background:${colorOf(a)}">${esc(fmtTime(a.starts_at))} ${esc(a.title)} · ${esc(a.member_id ? nameOf(a.member_id) : 'Famille')}</div>`).join('')}</div>` : '<div class="empty2">—</div>'}</div>`;
+  }).join('')}</div>${calLegend()}`;
+}
+function calMonthView() {
+  const ref = S.calDate || todayStr(), first = ref.slice(0, 8) + '01';
+  const start = mondayOf(first), month = ref.slice(0, 7);
+  const sel = S.calSel && S.calSel.startsWith(month) ? S.calSel : (todayStr().startsWith(month) ? todayStr() : first);
+  const cells = []; for (let i = 0; i < 42; i++) cells.push(addDays(start, i));
+  while (cells.length > 35 && !cells.slice(-7).some((d) => d.startsWith(month))) cells.splice(-7);
+  const title = fmt(new Date(first + 'T12:00:00'), { month: 'long', year: 'numeric' });
+  const selList = apptsOn(sel).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+  return `${calNavBar(title[0].toUpperCase() + title.slice(1))}<div class="month"><div class="mgrid">
+    ${DAY_LETTERS.map((l) => `<div class="h">${l}</div>`).join('')}
+    ${cells.map((d) => {
+      const list = apptsOn(d).slice(0, 4);
+      return `<div class="c2 ${d.startsWith(month) ? '' : 'out'} ${d === todayStr() ? 'today' : ''} ${d === sel ? 'sel' : ''}" data-act="calSel" data-d="${d}">
+        <span>${Number(d.slice(8))}</span><div class="dots">${list.map((a) => `<i class="dot" style="background:${colorOf(a)}"></i>`).join('')}</div></div>`;
+    }).join('')}</div></div>
+    <h2>${esc(fmt(new Date(sel + 'T12:00:00'), { weekday: 'long', day: 'numeric', month: 'long' }))}</h2>
+    ${selList.length ? `<div class="list">${selList.map(apptItem).join('')}</div>` : '<p class="empty">Aucun rendez-vous ce jour-là.</p>'}${calLegend()}`;
+}
+// liste : contenu de la vue Liste (différent sur l'accueil et dans l'onglet Agenda)
+function calendar(liste) {
+  const v = S.calView;
+  const seg = `<div class="seg">${CAL_VIEWS.map(([k, l]) => `<button class="${k === v ? 'on' : ''}" data-act="calView" data-v="${k}">${l}</button>`).join('')}</div>`;
+  return seg + (v === 'jour' ? calDayView() : v === 'semaine' ? calWeekView() : v === 'mois' ? calMonthView() : liste());
+}
+
 function apptItem(a) {
   const d = new Date(a.starts_at);
-  return `<div class="item tap" data-act="editAppt" data-id="${a.id}">
+  return `<div class="item tap" data-act="editAppt" data-id="${a.id}"><span class="stripe" style="background:${colorOf(a)}"></span>
     <div class="date-badge"><b>${d.getDate()}</b><span>${esc(fmt(d, { month: 'short' }).replace('.', ''))}</span></div>
     <div class="grow"><div class="t">${esc(a.title)}</div>
     <div class="s">${a.member_id ? esc(nameOf(a.member_id)) + ' · ' : ''}${esc(fmtTime(a.starts_at))}${a.location ? ' · ' + esc(a.location) : ''}</div>
@@ -482,7 +560,7 @@ const VIEWS = {
       <p style="margin:2px 0 4px;font-size:20px;font-weight:600">${hello} ${esc(nameOf(S.me))} 👋</p>
       <p class="muted" style="margin:0 0 6px">${esc(fmtDayLong(new Date().toISOString()))}</p>
       ${myTasksCard()}${kidsCard()}
-      <h2>Prochains rendez-vous</h2>${appts.length ? `<div class="list">${appts.map(apptItem).join('')}</div>` : '<p class="empty">Aucun rendez-vous à venir.</p>'}
+      <h2>Rendez-vous</h2>${calendar(() => appts.length ? `<div class="list">${appts.map(apptItem).join('')}</div>` : '<p class="empty">Aucun rendez-vous à venir.</p>')}
       ${bills.length ? `<h2>Factures à payer</h2><div class="list">${bills.map(billItem).join('')}</div>` : ''}
       ${maint.length ? `<h2>Entretien véhicules</h2><div class="list">${maint.map((m) => maintItem(m, true)).join('')}</div>` : ''}
       <h2>Courses</h2><div class="list"><div class="item tap" data-act="go" data-tab="courses"><div class="grow"><div class="t">🛒 ${shop} article${shop > 1 ? 's' : ''} sur la liste</div></div>›</div></div>`;
@@ -494,10 +572,10 @@ const VIEWS = {
     if (S.showPast) list.reverse();
     const groups = {};
     for (const a of list) (groups[fmt(new Date(a.starts_at), { month: 'long', year: 'numeric' })] ||= []).push(a);
-    return `<div class="row" style="margin-bottom:6px"><button class="btn sm" data-act="togglePast">${S.showPast ? '← Rendez-vous à venir' : 'Voir les rendez-vous passés'}</button></div>
+    return calendar(() => `<div class="row" style="margin-bottom:6px"><button class="btn sm" data-act="togglePast">${S.showPast ? '← Rendez-vous à venir' : 'Voir les rendez-vous passés'}</button></div>
       ${Object.keys(groups).length ? Object.entries(groups).map(([m, items]) => `<h2>${esc(m)}</h2><div class="list">${items.map(apptItem).join('')}</div>`).join('')
-        : `<p class="empty">${S.showPast ? 'Aucun rendez-vous passé.' : 'Aucun rendez-vous à venir. Touche + pour en ajouter un.'}</p>`}
-      <button class="fab" data-act="newAppt" aria-label="Ajouter">+</button>`;
+        : `<p class="empty">${S.showPast ? 'Aucun rendez-vous passé.' : 'Aucun rendez-vous à venir. Touche + pour en ajouter un.'}</p>`}`)
+      + `<button class="fab" data-act="newAppt" aria-label="Ajouter">+</button>`;
   },
 
   courses() {
@@ -616,6 +694,11 @@ const VIEWS = {
         <div class="item"><div class="grow"><div class="t">Notifications</div><div class="s">${esc(pushState)}</div></div>
         <button class="btn sm" data-act="enablePush">Activer</button><button class="btn sm" data-act="testPush">Tester</button></div></div>
 
+      <h2>Couleurs de l'agenda</h2><div class="list">
+        ${[...S.D.members.map((m) => [m.id, m.name]), ['all', 'Toute la famille']].map(([id, n]) => { const cur = colors()[id]; return `<div class="item">
+          <div class="avatar" style="border-color:${cur};color:${cur}">${esc(n[0])}</div><div class="grow"><div class="t">${esc(n)}</div>
+          <div class="swatches">${PALETTE.map((c) => `<button class="sw ${c === cur ? 'on' : ''}" style="background:${c}" data-act="setColor" data-id="${id}" data-c="${c}" aria-label="Couleur"></button>`).join('')}</div></div></div>`; }).join('')}</div>
+
       <h2>Synchronisation agenda</h2><div class="card">
         <p class="small" style="margin-top:0">Les rendez-vous, échéances de factures et entretiens apparaissent dans ton agenda (lecture seule, mise à jour automatique).</p>
         <div id="icsBox"><button class="btn" data-act="icsUrl">Obtenir le lien d'agenda</button></div></div>
@@ -678,6 +761,21 @@ const ACT = {
   changeMe: () => { S.me = null; store.set('me', null); render(); },
   logout: async () => { if (confirm('Se déconnecter ?')) { await sb.auth.signOut(); store.set('me', null); location.reload(); } },
   togglePast: () => { S.showPast = !S.showPast; render(); },
+  calView: (d) => { S.calView = d.v; store.set('calView', d.v); rerender(); },
+  calNav: (d) => {
+    const n = Number(d.d), cur = S.calDate || todayStr();
+    if (!n) { S.calDate = todayStr(); S.calSel = todayStr(); }
+    else if (S.calView === 'jour') S.calDate = addDays(cur, n);
+    else if (S.calView === 'semaine') S.calDate = addDays(cur, 7 * n);
+    else { const dt = new Date(cur.slice(0, 8) + '15T12:00:00'); dt.setMonth(dt.getMonth() + n); S.calDate = toLocalInput(dt.toISOString()).slice(0, 10); S.calSel = null; }
+    rerender();
+  },
+  calSel: (d) => { S.calSel = d.d; if (!d.d.startsWith((S.calDate || todayStr()).slice(0, 7))) S.calDate = d.d; rerender(); },
+  setColor: async (d) => {
+    const val = { ...(setting('colors') || {}), [d.id]: d.c };
+    await db(sb.from('settings').upsert({ key: 'colors', value: val }));
+    await load('settings'); rerender();
+  },
 
   enablePush: async () => {
     try { if (await subscribePush(true)) { toast('🔔 Notifications activées'); rerender(); } }

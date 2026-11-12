@@ -196,3 +196,45 @@ table.grid { width: 100%; border-collapse: separate; border-spacing: 0; backgrou
 .bar.sm { margin: 6px 0 4px; height: 5px; }
 .item.kid { align-items: flex-start; }
 .item.kid .avatar { margin-top: 2px; }
+
+/* ---------- Agenda : vues & couleurs ---------- */
+.stripe { width: 4px; align-self: stretch; border-radius: 4px; flex: none; margin-right: -2px; }
+.seg { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--bg2); border-radius: 12px; padding: 3px; margin: 0 0 10px; }
+.seg button { border: 0; background: none; padding: 7px 0; border-radius: 9px; font-size: 14px; color: var(--muted); cursor: pointer; }
+.seg button.on { background: var(--card); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.18); }
+.nav2 { display: flex; align-items: center; justify-content: space-between; margin: 0 0 8px; gap: 6px; }
+.nav2 b { font-size: 15px; cursor: pointer; text-align: center; }
+.nav2 button { border: 1px solid var(--line); background: var(--card); border-radius: 10px; width: 34px; height: 34px; font-size: 18px; cursor: pointer; flex: none; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+.legend2 { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); margin: 10px 2px 0; }
+.legend2 span { display: inline-flex; align-items: center; gap: 5px; }
+.day { position: relative; border: 1px solid var(--line); border-radius: 14px; background: var(--card); padding: 4px 8px 4px 46px; margin-bottom: 8px; }
+.hr { height: 44px; border-top: 1px solid var(--line); position: relative; }
+.hr:first-child { border-top: 0; }
+.hr i { position: absolute; left: -40px; top: -8px; font-size: 11px; color: var(--muted); font-style: normal; }
+.ev { position: absolute; border-radius: 9px; padding: 4px 8px; font-size: 12px; color: #fff; line-height: 1.25; overflow: hidden; cursor: pointer; }
+.ev b { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.now { position: absolute; left: 44px; right: 6px; height: 2px; background: var(--danger); pointer-events: none; }
+.now:before { content: ""; position: absolute; left: -4px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
+.wrow { display: flex; gap: 10px; padding: 9px 12px; border-top: 1px solid var(--line); align-items: flex-start; }
+.wrow:first-child { border-top: 0; }
+.wrow .d { width: 40px; flex: none; text-align: center; line-height: 1.1; }
+.wrow .d small { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; }
+.wrow .d b { font-size: 18px; }
+.wrow.today .d b { background: var(--accent); color: var(--accent-text); border-radius: 50%; display: inline-grid; place-items: center; width: 30px; height: 30px; font-size: 15px; }
+.chips2 { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 0; padding-top: 2px; }
+.pill { border-radius: 8px; padding: 5px 8px; font-size: 13px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.empty2 { color: var(--muted); font-size: 13px; padding-top: 8px; }
+.month { border: 1px solid var(--line); border-radius: 14px; background: var(--card); padding: 8px 6px; }
+.mgrid { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; row-gap: 4px; }
+.mgrid .h { font-size: 11px; color: var(--muted); font-weight: 600; padding-bottom: 4px; }
+.mgrid .c2 { height: 44px; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 14px; padding-top: 3px; border-radius: 10px; cursor: pointer; }
+.mgrid .c2 > span { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; }
+.mgrid .c2.out { opacity: .35; }
+.mgrid .c2.sel { background: var(--bg2); }
+.mgrid .c2.today > span { background: var(--accent); color: var(--accent-text); font-weight: 700; }
+.mgrid .dots { display: flex; gap: 2px; }
+.mgrid .dots .dot { width: 6px; height: 6px; }
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.sw { width: 28px; height: 28px; border-radius: 50%; border: 0; padding: 0; cursor: pointer; }
+.sw.on { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--text); }
